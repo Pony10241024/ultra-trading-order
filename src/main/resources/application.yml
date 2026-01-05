@@ -1,0 +1,55 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ultra-trading-order
+  redis:
+    redisson:
+      config: |
+        singleServerConfig:
+          address: "redis://127.0.0.1:6379"
+          database: 0
+          connectionPoolSize: 64
+          connectionMinimumIdleSize: 10
+          timeout: 3000
+        threads: 16
+        nettyThreads: 32
+
+# Gateway TCP Configuration
+gateway:
+  tcp:
+    host: 127.0.0.1
+    port: 9900
+    reconnect-interval: 5000
+    connect-timeout: 10000
+
+# ZeroMQ Configuration
+zeromq:
+  ems:
+    endpoint: "tcp://127.0.0.1:5555"
+    socket-type: PUSH
+
+# Exchange API Configuration
+exchange:
+  binance:
+    api-url: "https://api.binance.com"
+  okx:
+    api-url: "https://www.okx.com"
+
+# Symbol Sync Configuration
+symbol:
+  sync:
+    enabled: true
+    initial-delay: 0
+    fixed-rate: 300000  # 5 minutes
+
+# Redis Keys Configuration
+redis:
+  keys:
+    symbol-prefix: "trading:symbol:"
+    order-prefix: "trading:order:"
+    trade-prefix: "trading:trade:"
+    asset-prefix: "trading:asset:"
+    balance-prefix: "trading:balance:"
+    flow-prefix: "trading:flow:"
