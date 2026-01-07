@@ -10,6 +10,7 @@ public class Trade implements Serializable {
 
     private String tradeId;             // 成交ID
     private String orderId;             // 订单ID
+    private String counterOrderId;      // 对手订单ID
     private String userId;              // 用户ID
     private String symbol;              // 交易对
     private BigDecimal price;           // 成交价格

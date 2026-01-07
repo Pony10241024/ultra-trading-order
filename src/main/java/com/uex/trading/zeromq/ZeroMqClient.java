@@ -26,7 +26,7 @@ public class ZeroMqClient {
         try {
             log.info("Initializing ZeroMQ client, endpoint: {}", emsEndpoint);
             context = new ZContext();
-            socket = context.createSocket(SocketType.PUSH);
+            socket = context.createSocket(SocketType.PUB);
             socket.connect(emsEndpoint);
             socket.setSendTimeOut(5000);
             log.info("ZeroMQ client initialized successfully");
@@ -39,7 +39,9 @@ public class ZeroMqClient {
     public void sendToEms(EmsMessage message) {
         try {
             String json = objectMapper.writeValueAsString(message);
-            boolean sent = socket.send(json.getBytes(ZMQ.CHARSET), 0);
+            // Add "ORDER." topic prefix for PUB-SUB pattern
+            String messageWithTopic = "ORDER." + json;
+            boolean sent = socket.send(messageWithTopic.getBytes(ZMQ.CHARSET), 0);
 
             if (sent) {
                 log.info("Message sent to EMS: eventType={}, orderId={}",

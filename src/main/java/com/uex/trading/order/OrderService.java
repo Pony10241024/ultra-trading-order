@@ -35,8 +35,9 @@ public class OrderService {
     @Autowired
     private RedissonClient redissonClient;
 
-    @Autowired
-    private GatewayTcpClient gatewayClient;
+    // GatewayTcpClient removed - now we are TCP server, gateway connects to us
+    // @Autowired
+    // private GatewayTcpClient gatewayClient;
 
     @Autowired
     private ZeroMqClient zeroMqClient;
@@ -81,8 +82,8 @@ public class OrderService {
         // 保存订单到Redis
         saveOrder(order);
 
-        // 发送到网关
-        sendOrderToGateway(order);
+        // 不再主动发送到网关，网关会通过TCP请求我们
+        // sendOrderToGateway(order);
 
         // 发送消息给EMS
         notifyEmsOrderSubmit(order);
@@ -108,8 +109,8 @@ public class OrderService {
             throw new RuntimeException("Cannot cancel order in status: " + order.getStatus());
         }
 
-        // 发送撤单请求到网关
-        sendCancelToGateway(order);
+        // 不再主动发送到网关，网关会通过TCP请求我们
+        // sendCancelToGateway(order);
 
         // 发送消息给EMS
         notifyEmsOrderCancel(order);
@@ -137,6 +138,8 @@ public class OrderService {
         return new ArrayList<>(trades);
     }
 
+    // No longer needed - Gateway sends requests to us via TCP server
+    /*
     @EventListener
     public void handleOrderResponse(GatewayResponseDispatcher.OrderResponseEvent event) {
         try {
@@ -185,7 +188,11 @@ public class OrderService {
             log.error("Failed to process cancel response", e);
         }
     }
+    */
 
+    // Trade notification now comes from EMS via ZeroMQ, not from Gateway
+    // This EventListener will be replaced with ZeroMQ consumer
+    /*
     @EventListener
     public void handleTradeNotify(GatewayResponseDispatcher.TradeNotifyEvent event) {
         try {
@@ -200,6 +207,12 @@ public class OrderService {
             String feeAsset = data.get("feeAsset").asText();
             boolean isMaker = data.get("isMaker").asBoolean();
 
+            // 解析对手订单ID（可选字段）
+            String counterOrderId = null;
+            if (data.has("counterOrderId") && !data.get("counterOrderId").isNull()) {
+                counterOrderId = data.get("counterOrderId").asText();
+            }
+
             Order order = getOrder(orderId);
             if (order == null) {
                 log.error("Order not found for trade: orderId={}", orderId);
@@ -210,6 +223,7 @@ public class OrderService {
             Trade trade = new Trade();
             trade.setTradeId(tradeId);
             trade.setOrderId(orderId);
+            trade.setCounterOrderId(counterOrderId);
             trade.setUserId(order.getUserId());
             trade.setSymbol(order.getSymbol());
             trade.setPrice(price);
@@ -245,10 +259,52 @@ public class OrderService {
             // 通知EMS
             notifyEmsTradeFilled(trade);
 
-            log.info("Trade processed: tradeId={}, orderId={}, price={}, qty={}",
-                    tradeId, orderId, price, quantity);
+            log.info("Trade processed: tradeId={}, orderId={}, counterOrderId={}, price={}, qty={}",
+                    tradeId, orderId, counterOrderId, price, quantity);
         } catch (Exception e) {
             log.error("Failed to process trade notify", e);
+        }
+    }
+    */
+
+    // Method to handle trade notification - will be called by ZeroMQ consumer
+    public void handleTradeFromEms(Trade trade) {
+        try {
+            String orderId = trade.getOrderId();
+            Order order = getOrder(orderId);
+            if (order == null) {
+                log.error("Order not found for trade: orderId={}", orderId);
+                return;
+            }
+
+            // Save trade
+            saveTrade(trade);
+
+            // Update order
+            BigDecimal filledQty = order.getFilledQty().add(trade.getQuantity());
+            order.setFilledQty(filledQty);
+
+            // Update average price
+            BigDecimal totalValue = order.getAvgPrice().multiply(order.getFilledQty().subtract(trade.getQuantity()))
+                    .add(trade.getPrice().multiply(trade.getQuantity()));
+            order.setAvgPrice(totalValue.divide(filledQty, 8, BigDecimal.ROUND_HALF_UP));
+
+            // Update order status
+            if (filledQty.compareTo(order.getQuantity()) >= 0) {
+                order.setStatus(OrderStatus.FILLED);
+            } else {
+                order.setStatus(OrderStatus.PARTIAL_FILLED);
+            }
+            order.setUpdateTime(System.currentTimeMillis());
+            saveOrder(order);
+
+            // Update asset
+            assetService.updateAssetOnTrade(trade, order);
+
+            log.info("Trade processed from EMS: tradeId={}, orderId={}, counterOrderId={}, price={}, qty={}",
+                    trade.getTradeId(), orderId, trade.getCounterOrderId(), trade.getPrice(), trade.getQuantity());
+        } catch (Exception e) {
+            log.error("Failed to process trade from EMS", e);
         }
     }
 
@@ -267,6 +323,8 @@ public class OrderService {
         }
     }
 
+    // No longer needed - Gateway connects to us as TCP server
+    /*
     private void sendOrderToGateway(Order order) {
         try {
             GatewayMessage message = new GatewayMessage();
@@ -296,6 +354,7 @@ public class OrderService {
             throw new RuntimeException("Failed to send cancel to gateway", e);
         }
     }
+    */
 
     private void notifyEmsOrderSubmit(Order order) {
         try {

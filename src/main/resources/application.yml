@@ -16,19 +16,17 @@ spring:
         threads: 16
         nettyThreads: 32
 
-# Gateway TCP Configuration
+# Gateway TCP Server Configuration (we are the TCP server, gateway connects to us)
 gateway:
   tcp:
-    host: 127.0.0.1
-    port: 9900
-    reconnect-interval: 5000
-    connect-timeout: 10000
+    port: 9900  # Our TCP server port
 
 # ZeroMQ Configuration
 zeromq:
   ems:
-    endpoint: "tcp://127.0.0.1:5555"
-    socket-type: PUSH
+    endpoint: "tcp://127.0.0.1:5555"  # Send order events to EMS
+  trade:
+    port: 5556  # Receive trade notifications from EMS
 
 # Exchange API Configuration
 exchange:
