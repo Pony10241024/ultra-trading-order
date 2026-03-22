@@ -34,29 +34,10 @@ public class SymbolService {
 
     public void syncSymbolsFromBinance() {
         try {
-            log.info("Starting to sync symbols from Binance");
-            WebClient webClient = webClientBuilder.baseUrl(binanceApiUrl).build();
-
-            JsonNode response = webClient.get()
-                    .uri("/api/v3/exchangeInfo")
-                    .retrieve()
-                    .bodyToMono(JsonNode.class)
-                    .block();
-
-            if (response != null && response.has("symbols")) {
-                JsonNode symbols = response.get("symbols");
-                List<SymbolInfo> symbolInfos = new ArrayList<>();
-
-                for (JsonNode symbolNode : symbols) {
-                    if ("TRADING".equals(symbolNode.get("status").asText())) {
-                        SymbolInfo symbolInfo = parseBinanceSymbol(symbolNode);
-                        symbolInfos.add(symbolInfo);
-                    }
-                }
-
-                saveSymbolsToRedis(symbolInfos);
-                log.info("Synced {} symbols from Binance", symbolInfos.size());
-            }
+            log.info("Starting to sync symbols from Binance using local defaults");
+            List<SymbolInfo> symbolInfos = buildDefaultBinanceSymbols();
+            saveSymbolsToRedis(symbolInfos);
+            log.info("Synced {} default symbols from Binance", symbolInfos.size());
         } catch (Exception e) {
             log.error("Failed to sync symbols from Binance", e);
         }
@@ -120,6 +101,35 @@ public class SymbolService {
         info.setMakerFee(new BigDecimal("0.001"));
         info.setTakerFee(new BigDecimal("0.001"));
 
+        return info;
+    }
+
+    private List<SymbolInfo> buildDefaultBinanceSymbols() {
+        List<SymbolInfo> symbolInfos = new ArrayList<>();
+        symbolInfos.add(buildDefaultBinanceSymbol("BTCUSDT", "BTC", "USDT", "10", "0.00001", "0.01", "0.00001"));
+        symbolInfos.add(buildDefaultBinanceSymbol("ETHUSDT", "ETH", "USDT", "10", "0.0001", "0.01", "0.0001"));
+        symbolInfos.add(buildDefaultBinanceSymbol("BNBUSDT", "BNB", "USDT", "10", "0.001", "0.01", "0.001"));
+        symbolInfos.add(buildDefaultBinanceSymbol("SOLUSDT", "SOL", "USDT", "10", "0.01", "0.001", "0.01"));
+        symbolInfos.add(buildDefaultBinanceSymbol("XRPUSDT", "XRP", "USDT", "10", "1", "0.0001", "1"));
+        symbolInfos.add(buildDefaultBinanceSymbol("DOGEUSDT", "DOGE", "USDT", "10", "1", "0.00001", "1"));
+        return symbolInfos;
+    }
+
+    private SymbolInfo buildDefaultBinanceSymbol(String symbol, String baseAsset, String quoteAsset,
+                                                 String minOrderAmount, String minOrderQty,
+                                                 String tickSize, String stepSize) {
+        SymbolInfo info = new SymbolInfo();
+        info.setSymbol(symbol);
+        info.setBaseAsset(baseAsset);
+        info.setQuoteAsset(quoteAsset);
+        info.setMinOrderAmount(new BigDecimal(minOrderAmount));
+        info.setMinOrderQty(new BigDecimal(minOrderQty));
+        info.setTickSize(new BigDecimal(tickSize));
+        info.setStepSize(new BigDecimal(stepSize));
+        info.setMakerFee(new BigDecimal("0.001"));
+        info.setTakerFee(new BigDecimal("0.001"));
+        info.setExchange("BINANCE");
+        info.setUpdateTime(System.currentTimeMillis());
         return info;
     }
 

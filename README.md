@@ -109,9 +109,12 @@ spring:
 # 网关TCP配置
 gateway:
   tcp:
-    host: 127.0.0.1
     port: 9900
+    client:
+      enabled: false
+    host: 127.0.0.1
     reconnect-interval: 5000
+    connect-timeout: 3000
 
 # ZeroMQ配置
 zeromq:

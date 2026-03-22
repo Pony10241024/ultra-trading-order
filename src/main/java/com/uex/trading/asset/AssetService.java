@@ -4,6 +4,9 @@ import com.uex.trading.common.FlowType;
 import com.uex.trading.common.OrderSide;
 import com.uex.trading.order.Order;
 import com.uex.trading.order.Trade;
+import com.uex.trading.persistence.AsyncPersistenceService;
+import com.uex.trading.symbol.SymbolInfo;
+import com.uex.trading.symbol.SymbolService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RList;
 import org.redisson.api.RMap;
@@ -23,6 +26,12 @@ public class AssetService {
 
     @Autowired
     private RedissonClient redissonClient;
+
+    @Autowired
+    private AsyncPersistenceService asyncPersistenceService;
+
+    @Autowired
+    private SymbolService symbolService;
 
     @Value("${redis.keys.balance-prefix}")
     private String balancePrefix;
@@ -69,13 +78,28 @@ public class AssetService {
         return balances;
     }
 
+    public Balance increaseAsset(String userId, String asset, BigDecimal amount, String description) {
+        String normalizedAsset = asset.trim().toUpperCase();
+        Balance balance = getBalance(userId, normalizedAsset);
+        balance.setAvailable(balance.getAvailable().add(amount));
+        balance.setUpdateTime(System.currentTimeMillis());
+
+        saveBalance(balance);
+        recordFlow(userId, normalizedAsset, FlowType.DEPOSIT, amount,
+                balance.getAvailable(), null,
+                description == null || description.isBlank() ? "Manual asset increase" : description);
+
+        log.info("Asset increased: userId={}, asset={}, amount={}", userId, normalizedAsset, amount);
+        return balance;
+    }
+
     public void freezeAsset(String userId, Order order) {
         String asset;
         BigDecimal amount;
 
         if (order.getSide() == OrderSide.BUY) {
             // 买单冻结计价货币
-            asset = order.getSymbol().replaceAll("^[A-Z]+", "");
+            asset = getQuoteAsset(order.getSymbol());
             if (order.getPrice() != null) {
                 amount = order.getPrice().multiply(order.getQuantity());
             } else {
@@ -83,7 +107,7 @@ public class AssetService {
             }
         } else {
             // 卖单冻结基础货币
-            asset = order.getSymbol().replaceAll("[A-Z]+$", "");
+            asset = getBaseAsset(order.getSymbol());
             amount = order.getQuantity();
         }
 
@@ -106,11 +130,11 @@ public class AssetService {
         BigDecimal amount;
 
         if (order.getSide() == OrderSide.BUY) {
-            asset = order.getSymbol().replaceAll("^[A-Z]+", "");
+            asset = getQuoteAsset(order.getSymbol());
             BigDecimal remainQty = order.getQuantity().subtract(order.getFilledQty());
             amount = order.getPrice().multiply(remainQty);
         } else {
-            asset = order.getSymbol().replaceAll("[A-Z]+$", "");
+            asset = getBaseAsset(order.getSymbol());
             amount = order.getQuantity().subtract(order.getFilledQty());
         }
 
@@ -129,8 +153,8 @@ public class AssetService {
 
         if (order.getSide() == OrderSide.BUY) {
             // 买入：扣除冻结的计价货币，增加基础货币
-            String quoteAsset = order.getSymbol().replaceAll("^[A-Z]+", "");
-            String baseAsset = order.getSymbol().replaceAll("[A-Z]+$", "");
+            String quoteAsset = getQuoteAsset(order.getSymbol());
+            String baseAsset = getBaseAsset(order.getSymbol());
 
             // 扣除冻结的计价货币
             BigDecimal cost = trade.getPrice().multiply(trade.getQuantity());
@@ -156,8 +180,8 @@ public class AssetService {
 
         } else {
             // 卖出：扣除冻结的基础货币，增加计价货币
-            String baseAsset = order.getSymbol().replaceAll("[A-Z]+$", "");
-            String quoteAsset = order.getSymbol().replaceAll("^[A-Z]+", "");
+            String baseAsset = getBaseAsset(order.getSymbol());
+            String quoteAsset = getQuoteAsset(order.getSymbol());
 
             // 扣除冻结的基础货币
             Balance baseBalance = getBalance(userId, baseAsset);
@@ -207,6 +231,9 @@ public class AssetService {
         balanceMap.put("available", balance.getAvailable().toString());
         balanceMap.put("frozen", balance.getFrozen().toString());
         balanceMap.put("updateTime", balance.getUpdateTime().toString());
+
+        // 异步落库MySQL
+        asyncPersistenceService.saveBalanceAsync(balance);
     }
 
     private void recordFlow(String userId, String asset, FlowType flowType, BigDecimal amount,
@@ -230,11 +257,30 @@ public class AssetService {
         RList<AssetFlow> assetFlowList = redissonClient.getList(assetKey);
         assetFlowList.add(flow);
 
+        // 异步落库MySQL
+        asyncPersistenceService.saveAssetFlowAsync(flow);
+
         log.debug("Flow recorded: userId={}, asset={}, type={}, amount={}",
                 userId, asset, flowType, amount);
     }
 
     private String generateFlowId() {
         return "FLOW" + System.currentTimeMillis() + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private String getBaseAsset(String symbol) {
+        return getSymbolInfo(symbol).getBaseAsset();
+    }
+
+    private String getQuoteAsset(String symbol) {
+        return getSymbolInfo(symbol).getQuoteAsset();
+    }
+
+    private SymbolInfo getSymbolInfo(String symbol) {
+        SymbolInfo symbolInfo = symbolService.getSymbolInfo(symbol);
+        if (symbolInfo == null) {
+            throw new RuntimeException("Symbol not found: " + symbol);
+        }
+        return symbolInfo;
     }
 }

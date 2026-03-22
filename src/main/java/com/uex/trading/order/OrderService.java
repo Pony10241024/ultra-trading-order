@@ -14,6 +14,7 @@ import com.uex.trading.symbol.SymbolInfo;
 import com.uex.trading.symbol.SymbolService;
 import com.uex.trading.zeromq.EmsMessage;
 import com.uex.trading.zeromq.ZeroMqClient;
+import com.uex.trading.persistence.AsyncPersistenceService;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RList;
 import org.redisson.api.RMap;
@@ -47,6 +48,9 @@ public class OrderService {
 
     @Autowired
     private AssetService assetService;
+
+    @Autowired
+    private AsyncPersistenceService asyncPersistenceService;
 
     @Value("${redis.keys.order-prefix}")
     private String orderPrefix;
@@ -406,6 +410,9 @@ public class OrderService {
         if (!userOrders.contains(order.getOrderId())) {
             userOrders.add(order.getOrderId());
         }
+
+        // 异步落库MySQL
+        asyncPersistenceService.saveOrderAsync(order);
     }
 
     private Order getOrder(String orderId) {
@@ -419,6 +426,9 @@ public class OrderService {
 
         RList<Trade> userTrades = redissonClient.getList(tradePrefix + "user:" + trade.getUserId());
         userTrades.add(trade);
+
+        // 异步落库MySQL
+        asyncPersistenceService.saveTradeAsync(trade);
     }
 
     private String generateOrderId() {

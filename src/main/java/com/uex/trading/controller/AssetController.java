@@ -1,9 +1,11 @@
 package com.uex.trading.controller;
 
+import com.uex.trading.asset.AssetAdjustRequest;
 import com.uex.trading.asset.AssetFlow;
 import com.uex.trading.asset.AssetService;
 import com.uex.trading.asset.Balance;
 import com.uex.trading.common.ApiResponse;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +29,23 @@ public class AssetController {
             return ApiResponse.success(balance);
         } catch (Exception e) {
             log.error("Failed to get balance", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/increase")
+    public ApiResponse<Balance> increaseAsset(
+            @RequestHeader("X-User-Id") String userId,
+            @Valid @RequestBody AssetAdjustRequest request) {
+        try {
+            Balance balance = assetService.increaseAsset(
+                    userId,
+                    request.getAsset(),
+                    request.getAmount(),
+                    request.getDescription());
+            return ApiResponse.success(balance);
+        } catch (Exception e) {
+            log.error("Failed to increase asset", e);
             return ApiResponse.error(e.getMessage());
         }
     }

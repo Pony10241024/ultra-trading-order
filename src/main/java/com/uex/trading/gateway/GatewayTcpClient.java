@@ -10,24 +10,26 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "gateway.tcp.client", name = "enabled", havingValue = "true")
 public class GatewayTcpClient {
 
-    @Value("${gateway.tcp.host}")
+    @Value("${gateway.tcp.host:127.0.0.1}")
     private String host;
 
-    @Value("${gateway.tcp.port}")
+    @Value("${gateway.tcp.port:9900}")
     private int port;
 
-    @Value("${gateway.tcp.reconnect-interval}")
+    @Value("${gateway.tcp.reconnect-interval:5000}")
     private int reconnectInterval;
 
-    @Value("${gateway.tcp.connect-timeout}")
+    @Value("${gateway.tcp.connect-timeout:3000}")
     private int connectTimeout;
 
     @Autowired

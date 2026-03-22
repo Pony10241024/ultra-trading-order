@@ -28,7 +28,6 @@ public class SymbolSyncTask implements CommandLineRunner {
     private void syncSymbols() {
         try {
             symbolService.syncSymbolsFromBinance();
-            symbolService.syncSymbolsFromOkx();
             log.info("Symbol sync completed");
         } catch (Exception e) {
             log.error("Symbol sync failed", e);
