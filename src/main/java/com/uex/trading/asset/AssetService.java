@@ -39,14 +39,16 @@ public class AssetService {
     @Value("${redis.keys.flow-prefix}")
     private String flowPrefix;
 
-    public Balance getBalance(String userId, String asset) {
-        String key = balancePrefix + userId + ":" + asset;
+    public Balance getBalance(String mainAccountId, String tradeAccount, String asset) {
+        String normalizedAsset = asset.trim().toUpperCase();
+        String key = balancePrefix + tradeAccount + ":" + normalizedAsset;
         RMap<String, Object> balanceMap = redissonClient.getMap(key);
 
         if (balanceMap.isEmpty()) {
             Balance balance = new Balance();
-            balance.setUserId(userId);
-            balance.setAsset(asset);
+            balance.setMainAccountId(mainAccountId);
+            balance.setTradeAccount(tradeAccount);
+            balance.setAsset(normalizedAsset);
             balance.setAvailable(BigDecimal.ZERO);
             balance.setFrozen(BigDecimal.ZERO);
             balance.setUpdateTime(System.currentTimeMillis());
@@ -54,8 +56,9 @@ public class AssetService {
         }
 
         Balance balance = new Balance();
-        balance.setUserId(userId);
-        balance.setAsset(asset);
+        balance.setMainAccountId(balanceMap.getOrDefault("mainAccountId", mainAccountId).toString());
+        balance.setTradeAccount(balanceMap.getOrDefault("tradeAccount", tradeAccount).toString());
+        balance.setAsset(normalizedAsset);
         balance.setAvailable(new BigDecimal(balanceMap.get("available").toString()));
         balance.setFrozen(new BigDecimal(balanceMap.get("frozen").toString()));
         balance.setUpdateTime(Long.parseLong(balanceMap.get("updateTime").toString()));
@@ -63,13 +66,13 @@ public class AssetService {
         return balance;
     }
 
-    public List<Balance> getAllBalances(String userId) {
-        String pattern = balancePrefix + userId + ":*";
+    public List<Balance> getAllBalances(String mainAccountId, String tradeAccount) {
+        String pattern = balancePrefix + tradeAccount + ":*";
         List<Balance> balances = new ArrayList<>();
 
         for (String key : redissonClient.getKeys().getKeysByPattern(pattern)) {
             String asset = key.substring(key.lastIndexOf(":") + 1);
-            Balance balance = getBalance(userId, asset);
+            Balance balance = getBalance(mainAccountId, tradeAccount, asset);
             if (balance.getTotal().compareTo(BigDecimal.ZERO) > 0) {
                 balances.add(balance);
             }
@@ -78,22 +81,26 @@ public class AssetService {
         return balances;
     }
 
-    public Balance increaseAsset(String userId, String asset, BigDecimal amount, String description) {
+    public Balance increaseAsset(String mainAccountId, String tradeAccount, String asset, BigDecimal amount, String description) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new RuntimeException("Amount must be greater than 0");
+        }
+
         String normalizedAsset = asset.trim().toUpperCase();
-        Balance balance = getBalance(userId, normalizedAsset);
+        Balance balance = getBalance(mainAccountId, tradeAccount, normalizedAsset);
         balance.setAvailable(balance.getAvailable().add(amount));
         balance.setUpdateTime(System.currentTimeMillis());
 
         saveBalance(balance);
-        recordFlow(userId, normalizedAsset, FlowType.DEPOSIT, amount,
+        recordFlow(mainAccountId, tradeAccount, normalizedAsset, FlowType.DEPOSIT, amount,
                 balance.getAvailable(), null,
                 description == null || description.isBlank() ? "Manual asset increase" : description);
 
-        log.info("Asset increased: userId={}, asset={}, amount={}", userId, normalizedAsset, amount);
+        log.info("Asset increased: tradeAccount={}, asset={}, amount={}", tradeAccount, normalizedAsset, amount);
         return balance;
     }
 
-    public void freezeAsset(String userId, Order order) {
+    public void freezeAsset(Order order) {
         String asset;
         BigDecimal amount;
 
@@ -111,7 +118,7 @@ public class AssetService {
             amount = order.getQuantity();
         }
 
-        Balance balance = getBalance(userId, asset);
+        Balance balance = getBalance(order.getMainAccountId(), order.getTradeAccount(), asset);
         if (balance.getAvailable().compareTo(amount) < 0) {
             throw new RuntimeException("Insufficient balance: " + asset);
         }
@@ -122,7 +129,7 @@ public class AssetService {
 
         saveBalance(balance);
 
-        log.info("Asset frozen: userId={}, asset={}, amount={}", userId, asset, amount);
+        log.info("Asset frozen: tradeAccount={}, asset={}, amount={}", order.getTradeAccount(), asset, amount);
     }
 
     public void unfreezeAsset(Order order) {
@@ -138,18 +145,19 @@ public class AssetService {
             amount = order.getQuantity().subtract(order.getFilledQty());
         }
 
-        Balance balance = getBalance(order.getUserId(), asset);
+        Balance balance = getBalance(order.getMainAccountId(), order.getTradeAccount(), asset);
         balance.setFrozen(balance.getFrozen().subtract(amount));
         balance.setAvailable(balance.getAvailable().add(amount));
         balance.setUpdateTime(System.currentTimeMillis());
 
         saveBalance(balance);
 
-        log.info("Asset unfrozen: userId={}, asset={}, amount={}", order.getUserId(), asset, amount);
+        log.info("Asset unfrozen: tradeAccount={}, asset={}, amount={}", order.getTradeAccount(), asset, amount);
     }
 
     public void updateAssetOnTrade(Trade trade, Order order) {
-        String userId = order.getUserId();
+        String mainAccountId = order.getMainAccountId();
+        String tradeAccount = order.getTradeAccount();
 
         if (order.getSide() == OrderSide.BUY) {
             // 买入：扣除冻结的计价货币，增加基础货币
@@ -158,24 +166,24 @@ public class AssetService {
 
             // 扣除冻结的计价货币
             BigDecimal cost = trade.getPrice().multiply(trade.getQuantity());
-            Balance quoteBalance = getBalance(userId, quoteAsset);
+            Balance quoteBalance = getBalance(mainAccountId, tradeAccount, quoteAsset);
             quoteBalance.setFrozen(quoteBalance.getFrozen().subtract(cost));
             quoteBalance.setUpdateTime(System.currentTimeMillis());
             saveBalance(quoteBalance);
 
             // 增加基础货币（扣除手续费）
             BigDecimal receivedQty = trade.getQuantity().subtract(trade.getFee());
-            Balance baseBalance = getBalance(userId, baseAsset);
+            Balance baseBalance = getBalance(mainAccountId, tradeAccount, baseAsset);
             baseBalance.setAvailable(baseBalance.getAvailable().add(receivedQty));
             baseBalance.setUpdateTime(System.currentTimeMillis());
             saveBalance(baseBalance);
 
             // 记录流水
-            recordFlow(userId, quoteAsset, FlowType.TRADE_OUT, cost.negate(),
+            recordFlow(mainAccountId, tradeAccount, quoteAsset, FlowType.TRADE_OUT, cost.negate(),
                     quoteBalance.getAvailable(), trade.getTradeId(), "Buy " + order.getSymbol());
-            recordFlow(userId, baseAsset, FlowType.TRADE_IN, receivedQty,
+            recordFlow(mainAccountId, tradeAccount, baseAsset, FlowType.TRADE_IN, receivedQty,
                     baseBalance.getAvailable(), trade.getTradeId(), "Buy " + order.getSymbol());
-            recordFlow(userId, baseAsset, FlowType.FEE, trade.getFee().negate(),
+            recordFlow(mainAccountId, tradeAccount, baseAsset, FlowType.FEE, trade.getFee().negate(),
                     baseBalance.getAvailable(), trade.getTradeId(), "Trade fee");
 
         } else {
@@ -184,34 +192,34 @@ public class AssetService {
             String quoteAsset = getQuoteAsset(order.getSymbol());
 
             // 扣除冻结的基础货币
-            Balance baseBalance = getBalance(userId, baseAsset);
+            Balance baseBalance = getBalance(mainAccountId, tradeAccount, baseAsset);
             baseBalance.setFrozen(baseBalance.getFrozen().subtract(trade.getQuantity()));
             baseBalance.setUpdateTime(System.currentTimeMillis());
             saveBalance(baseBalance);
 
             // 增加计价货币（扣除手续费）
             BigDecimal receivedAmount = trade.getPrice().multiply(trade.getQuantity()).subtract(trade.getFee());
-            Balance quoteBalance = getBalance(userId, quoteAsset);
+            Balance quoteBalance = getBalance(mainAccountId, tradeAccount, quoteAsset);
             quoteBalance.setAvailable(quoteBalance.getAvailable().add(receivedAmount));
             quoteBalance.setUpdateTime(System.currentTimeMillis());
             saveBalance(quoteBalance);
 
             // 记录流水
-            recordFlow(userId, baseAsset, FlowType.TRADE_OUT, trade.getQuantity().negate(),
+            recordFlow(mainAccountId, tradeAccount, baseAsset, FlowType.TRADE_OUT, trade.getQuantity().negate(),
                     baseBalance.getAvailable(), trade.getTradeId(), "Sell " + order.getSymbol());
-            recordFlow(userId, quoteAsset, FlowType.TRADE_IN, receivedAmount,
+            recordFlow(mainAccountId, tradeAccount, quoteAsset, FlowType.TRADE_IN, receivedAmount,
                     quoteBalance.getAvailable(), trade.getTradeId(), "Sell " + order.getSymbol());
-            recordFlow(userId, quoteAsset, FlowType.FEE, trade.getFee().negate(),
+            recordFlow(mainAccountId, tradeAccount, quoteAsset, FlowType.FEE, trade.getFee().negate(),
                     quoteBalance.getAvailable(), trade.getTradeId(), "Trade fee");
         }
 
-        log.info("Asset updated on trade: userId={}, tradeId={}", userId, trade.getTradeId());
+        log.info("Asset updated on trade: tradeAccount={}, tradeId={}", tradeAccount, trade.getTradeId());
     }
 
-    public List<AssetFlow> getFlowList(String userId, String asset, Integer limit) {
-        String key = flowPrefix + "user:" + userId;
+    public List<AssetFlow> getFlowList(String tradeAccount, String asset, Integer limit) {
+        String key = flowPrefix + "account:" + tradeAccount;
         if (asset != null) {
-            key += ":" + asset;
+            key += ":" + asset.trim().toUpperCase();
         }
 
         RList<AssetFlow> flowList = redissonClient.getList(key);
@@ -225,9 +233,11 @@ public class AssetService {
     }
 
     private void saveBalance(Balance balance) {
-        String key = balancePrefix + balance.getUserId() + ":" + balance.getAsset();
+        String key = balancePrefix + balance.getTradeAccount() + ":" + balance.getAsset();
         RMap<String, Object> balanceMap = redissonClient.getMap(key);
 
+        balanceMap.put("mainAccountId", balance.getMainAccountId());
+        balanceMap.put("tradeAccount", balance.getTradeAccount());
         balanceMap.put("available", balance.getAvailable().toString());
         balanceMap.put("frozen", balance.getFrozen().toString());
         balanceMap.put("updateTime", balance.getUpdateTime().toString());
@@ -236,11 +246,12 @@ public class AssetService {
         asyncPersistenceService.saveBalanceAsync(balance);
     }
 
-    private void recordFlow(String userId, String asset, FlowType flowType, BigDecimal amount,
+    private void recordFlow(String mainAccountId, String tradeAccount, String asset, FlowType flowType, BigDecimal amount,
                            BigDecimal balance, String relatedId, String description) {
         AssetFlow flow = new AssetFlow();
         flow.setFlowId(generateFlowId());
-        flow.setUserId(userId);
+        flow.setMainAccountId(mainAccountId);
+        flow.setTradeAccount(tradeAccount);
         flow.setAsset(asset);
         flow.setFlowType(flowType);
         flow.setAmount(amount);
@@ -249,19 +260,19 @@ public class AssetService {
         flow.setDescription(description);
         flow.setCreateTime(System.currentTimeMillis());
 
-        String key = flowPrefix + "user:" + userId;
+        String key = flowPrefix + "account:" + tradeAccount;
         RList<AssetFlow> flowList = redissonClient.getList(key);
         flowList.add(flow);
 
-        String assetKey = flowPrefix + "user:" + userId + ":" + asset;
+        String assetKey = flowPrefix + "account:" + tradeAccount + ":" + asset;
         RList<AssetFlow> assetFlowList = redissonClient.getList(assetKey);
         assetFlowList.add(flow);
 
         // 异步落库MySQL
         asyncPersistenceService.saveAssetFlowAsync(flow);
 
-        log.debug("Flow recorded: userId={}, asset={}, type={}, amount={}",
-                userId, asset, flowType, amount);
+        log.debug("Flow recorded: tradeAccount={}, asset={}, type={}, amount={}",
+                tradeAccount, asset, flowType, amount);
     }
 
     private String generateFlowId() {

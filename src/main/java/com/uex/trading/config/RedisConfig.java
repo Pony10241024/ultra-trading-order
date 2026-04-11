@@ -2,6 +2,7 @@ package com.uex.trading.config;
 
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
+import org.redisson.codec.JsonJacksonCodec;
 import org.redisson.config.Config;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -29,6 +30,7 @@ public class RedisConfig {
     public RedissonClient redissonClient() {
         try {
             Config config = Config.fromYAML(resolveRedissonConfigYaml());
+            config.setCodec(JsonJacksonCodec.INSTANCE);
             return Redisson.create(config);
         } catch (Exception e) {
             throw new RuntimeException("Failed to create Redisson client", e);

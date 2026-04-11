@@ -53,9 +53,11 @@ public class AsyncPersistenceService {
     public void saveBalanceAsync(Balance balance) {
         try {
             // 查找已有记录，更新或新增
-            Balance existing = balanceRepository.findByUserIdAndAsset(
-                balance.getUserId(), balance.getAsset()).orElse(null);
+            Balance existing = balanceRepository.findByTradeAccountAndAsset(
+                balance.getTradeAccount(), balance.getAsset()).orElse(null);
             if (existing != null) {
+                existing.setMainAccountId(balance.getMainAccountId());
+                existing.setTradeAccount(balance.getTradeAccount());
                 existing.setAvailable(balance.getAvailable());
                 existing.setFrozen(balance.getFrozen());
                 existing.setUpdateTime(balance.getUpdateTime());
@@ -63,11 +65,11 @@ public class AsyncPersistenceService {
             } else {
                 balanceRepository.save(balance);
             }
-            log.debug("Balance persisted to MySQL: userId={}, asset={}",
-                balance.getUserId(), balance.getAsset());
+            log.debug("Balance persisted to MySQL: tradeAccount={}, asset={}",
+                balance.getTradeAccount(), balance.getAsset());
         } catch (Exception e) {
-            log.error("Failed to persist balance to MySQL: userId={}, asset={}",
-                balance.getUserId(), balance.getAsset(), e);
+            log.error("Failed to persist balance to MySQL: tradeAccount={}, asset={}",
+                balance.getTradeAccount(), balance.getAsset(), e);
         }
     }
 

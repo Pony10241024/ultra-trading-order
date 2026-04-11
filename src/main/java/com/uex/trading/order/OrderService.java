@@ -12,6 +12,7 @@ import com.uex.trading.gateway.GatewayResponseDispatcher;
 import com.uex.trading.gateway.GatewayTcpClient;
 import com.uex.trading.symbol.SymbolInfo;
 import com.uex.trading.symbol.SymbolService;
+import com.uex.trading.repository.OrderRepository;
 import com.uex.trading.zeromq.EmsMessage;
 import com.uex.trading.zeromq.ZeroMqClient;
 import com.uex.trading.persistence.AsyncPersistenceService;
@@ -25,6 +26,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +36,8 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class OrderService {
+
+    private static final ZoneId BUSINESS_ZONE = ZoneOffset.UTC;
 
     @Autowired
     private RedissonClient redissonClient;
@@ -52,6 +58,9 @@ public class OrderService {
     @Autowired
     private AsyncPersistenceService asyncPersistenceService;
 
+    @Autowired
+    private OrderRepository orderRepository;
+
     @Value("${redis.keys.order-prefix}")
     private String orderPrefix;
 
@@ -60,14 +69,15 @@ public class OrderService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public Order submitOrder(String userId, OrderRequest request) {
+    public Order submitOrder(String mainAccountId, String tradeAccount, OrderRequest request) {
         // 参数校验
         validateOrderRequest(request);
 
         // 创建订单
         Order order = new Order();
         order.setOrderId(generateOrderId());
-        order.setUserId(userId);
+        order.setMainAccountId(mainAccountId);
+        order.setTradeAccount(tradeAccount);
         order.setSymbol(request.getSymbol());
         order.setOrderType(request.getOrderType());
         order.setSide(request.getSide());
@@ -81,7 +91,7 @@ public class OrderService {
         order.setClientOrderId(request.getClientOrderId());
 
         // 资金检查和冻结
-        assetService.freezeAsset(userId, order);
+        assetService.freezeAsset(order);
 
         // 保存订单到Redis
         saveOrder(order);
@@ -99,13 +109,13 @@ public class OrderService {
         return order;
     }
 
-    public void cancelOrder(String userId, String orderId) {
+    public void cancelOrder(String tradeAccount, String orderId) {
         Order order = getOrder(orderId);
         if (order == null) {
             throw new RuntimeException("Order not found: " + orderId);
         }
 
-        if (!order.getUserId().equals(userId)) {
+        if (!order.getTradeAccount().equals(tradeAccount)) {
             throw new RuntimeException("Order does not belong to user");
         }
 
@@ -122,8 +132,8 @@ public class OrderService {
         log.info("Cancel order request sent: orderId={}", orderId);
     }
 
-    public List<Order> getOrderList(String userId, String symbol) {
-        RList<String> orderIds = redissonClient.getList(orderPrefix + "user:" + userId);
+    public List<Order> getOrderList(String tradeAccount, String symbol) {
+        RList<String> orderIds = redissonClient.getList(orderPrefix + "account:" + tradeAccount);
         List<Order> orders = new ArrayList<>();
 
         for (String orderId : orderIds) {
@@ -136,7 +146,37 @@ public class OrderService {
         return orders;
     }
 
-    public List<Trade> getTradeList(String userId, String orderId) {
+    public List<Order> getTodayOrderList(String tradeAccount, String symbol) {
+        LocalDate today = LocalDate.now(BUSINESS_ZONE);
+        long startTime = today
+                .atStartOfDay(BUSINESS_ZONE)
+                .toInstant()
+                .toEpochMilli();
+        long endTime = today
+                .plusDays(1)
+                .atStartOfDay(BUSINESS_ZONE)
+                .toInstant()
+                .toEpochMilli();
+
+        if (symbol != null && !symbol.isBlank()) {
+            return orderRepository
+                    .findByTradeAccountAndSymbolAndCreateTimeGreaterThanEqualAndCreateTimeLessThanOrderByCreateTimeDesc(
+                            tradeAccount, symbol, startTime, endTime);
+        }
+
+        return orderRepository
+                .findByTradeAccountAndCreateTimeGreaterThanEqualAndCreateTimeLessThanOrderByCreateTimeDesc(
+                        tradeAccount, startTime, endTime);
+    }
+
+    public List<Trade> getTradeList(String tradeAccount, String orderId) {
+        Order order = getOrder(orderId);
+        if (order == null) {
+            throw new RuntimeException("Order not found: " + orderId);
+        }
+        if (!order.getTradeAccount().equals(tradeAccount)) {
+            throw new RuntimeException("Order does not belong to user");
+        }
         String key = tradePrefix + "order:" + orderId;
         RList<Trade> trades = redissonClient.getList(key);
         return new ArrayList<>(trades);
@@ -228,7 +268,8 @@ public class OrderService {
             trade.setTradeId(tradeId);
             trade.setOrderId(orderId);
             trade.setCounterOrderId(counterOrderId);
-            trade.setUserId(order.getUserId());
+            trade.setMainAccountId(order.getMainAccountId());
+            trade.setTradeAccount(order.getTradeAccount());
             trade.setSymbol(order.getSymbol());
             trade.setPrice(price);
             trade.setQuantity(quantity);
@@ -280,6 +321,9 @@ public class OrderService {
                 log.error("Order not found for trade: orderId={}", orderId);
                 return;
             }
+
+            trade.setMainAccountId(order.getMainAccountId());
+            trade.setTradeAccount(order.getTradeAccount());
 
             // Save trade
             saveTrade(trade);
@@ -406,9 +450,9 @@ public class OrderService {
         RMap<String, Order> orderMap = redissonClient.getMap(orderPrefix + "map");
         orderMap.put(order.getOrderId(), order);
 
-        RList<String> userOrders = redissonClient.getList(orderPrefix + "user:" + order.getUserId());
-        if (!userOrders.contains(order.getOrderId())) {
-            userOrders.add(order.getOrderId());
+        RList<String> accountOrders = redissonClient.getList(orderPrefix + "account:" + order.getTradeAccount());
+        if (!accountOrders.contains(order.getOrderId())) {
+            accountOrders.add(order.getOrderId());
         }
 
         // 异步落库MySQL
@@ -424,8 +468,8 @@ public class OrderService {
         RList<Trade> tradeList = redissonClient.getList(tradePrefix + "order:" + trade.getOrderId());
         tradeList.add(trade);
 
-        RList<Trade> userTrades = redissonClient.getList(tradePrefix + "user:" + trade.getUserId());
-        userTrades.add(trade);
+        RList<Trade> accountTrades = redissonClient.getList(tradePrefix + "account:" + trade.getTradeAccount());
+        accountTrades.add(trade);
 
         // 异步落库MySQL
         asyncPersistenceService.saveTradeAsync(trade);

@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class GatewayTcpServer {
 
-    @Value("${gateway.tcp.port:9900}")
+    @Value("${gateway.tcp.port:5502}")
     private int port;
 
     @Autowired

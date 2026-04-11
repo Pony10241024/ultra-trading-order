@@ -8,6 +8,10 @@ import java.util.List;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, String> {
-    List<Order> findByUserId(String userId);
-    List<Order> findByUserIdAndSymbol(String userId, String symbol);
+    List<Order> findByTradeAccount(String tradeAccount);
+    List<Order> findByTradeAccountAndSymbol(String tradeAccount, String symbol);
+    List<Order> findByTradeAccountAndCreateTimeGreaterThanEqualAndCreateTimeLessThanOrderByCreateTimeDesc(
+            String tradeAccount, Long startTime, Long endTime);
+    List<Order> findByTradeAccountAndSymbolAndCreateTimeGreaterThanEqualAndCreateTimeLessThanOrderByCreateTimeDesc(
+            String tradeAccount, String symbol, Long startTime, Long endTime);
 }

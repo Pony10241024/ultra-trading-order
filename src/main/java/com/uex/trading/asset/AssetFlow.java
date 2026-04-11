@@ -9,7 +9,8 @@ import java.math.BigDecimal;
 @Data
 @Entity
 @Table(name = "tb_asset_flow", indexes = {
-    @Index(name = "idx_user_id", columnList = "userId"),
+    @Index(name = "idx_main_account_id", columnList = "main_account_id"),
+    @Index(name = "idx_trade_account", columnList = "trade_account"),
     @Index(name = "idx_create_time", columnList = "createTime")
 })
 public class AssetFlow implements Serializable {
@@ -19,8 +20,11 @@ public class AssetFlow implements Serializable {
     @Column(length = 64)
     private String flowId;              // 流水ID
 
-    @Column(length = 64, nullable = false)
-    private String userId;              // 用户ID
+    @Column(name = "main_account_id", length = 16, nullable = false)
+    private String mainAccountId;       // 所属主账户
+
+    @Column(name = "trade_account", length = 16, nullable = false)
+    private String tradeAccount;        // 交易账号
 
     @Column(length = 16, nullable = false)
     private String asset;               // 资产币种

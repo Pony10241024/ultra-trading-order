@@ -23,7 +23,7 @@ public class GatewayTcpClient {
     @Value("${gateway.tcp.host:127.0.0.1}")
     private String host;
 
-    @Value("${gateway.tcp.port:9900}")
+    @Value("${gateway.tcp.port:5502}")
     private int port;
 
     @Value("${gateway.tcp.reconnect-interval:5000}")

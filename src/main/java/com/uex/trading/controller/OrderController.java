@@ -22,10 +22,15 @@ public class OrderController {
 
     @PostMapping("/submit")
     public ApiResponse<Order> submitOrder(
-            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Main-Account-Id", required = false) String mainAccountId,
+            @RequestHeader(value = "X-Trade-Account", required = false) String tradeAccount,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
             @Valid @RequestBody OrderRequest request) {
         try {
-            Order order = orderService.submitOrder(userId, request);
+            Order order = orderService.submitOrder(
+                    resolveMainAccountId(mainAccountId, userId),
+                    resolveTradeAccount(tradeAccount, userId),
+                    request);
             return ApiResponse.success(order);
         } catch (Exception e) {
             log.error("Failed to submit order", e);
@@ -35,10 +40,11 @@ public class OrderController {
 
     @PostMapping("/cancel/{orderId}")
     public ApiResponse<String> cancelOrder(
-            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Trade-Account", required = false) String tradeAccount,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
             @PathVariable String orderId) {
         try {
-            orderService.cancelOrder(userId, orderId);
+            orderService.cancelOrder(resolveTradeAccount(tradeAccount, userId), orderId);
             return ApiResponse.success("Order cancel request submitted");
         } catch (Exception e) {
             log.error("Failed to cancel order", e);
@@ -48,10 +54,11 @@ public class OrderController {
 
     @GetMapping("/list")
     public ApiResponse<List<Order>> getOrderList(
-            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Trade-Account", required = false) String tradeAccount,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
             @RequestParam(required = false) String symbol) {
         try {
-            List<Order> orders = orderService.getOrderList(userId, symbol);
+            List<Order> orders = orderService.getOrderList(resolveTradeAccount(tradeAccount, userId), symbol);
             return ApiResponse.success(orders);
         } catch (Exception e) {
             log.error("Failed to get order list", e);
@@ -59,16 +66,51 @@ public class OrderController {
         }
     }
 
+    @GetMapping("/today")
+    public ApiResponse<List<Order>> getTodayOrderList(
+            @RequestHeader(value = "X-Trade-Account", required = false) String tradeAccount,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
+            @RequestParam(required = false) String symbol) {
+        try {
+            List<Order> orders = orderService.getTodayOrderList(resolveTradeAccount(tradeAccount, userId), symbol);
+            return ApiResponse.success(orders);
+        } catch (Exception e) {
+            log.error("Failed to get today order list", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @GetMapping("/trades/{orderId}")
     public ApiResponse<List<Trade>> getTradeList(
-            @RequestHeader("X-User-Id") String userId,
+            @RequestHeader(value = "X-Trade-Account", required = false) String tradeAccount,
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
             @PathVariable String orderId) {
         try {
-            List<Trade> trades = orderService.getTradeList(userId, orderId);
+            List<Trade> trades = orderService.getTradeList(resolveTradeAccount(tradeAccount, userId), orderId);
             return ApiResponse.success(trades);
         } catch (Exception e) {
             log.error("Failed to get trade list", e);
             return ApiResponse.error(e.getMessage());
         }
+    }
+
+    private String resolveMainAccountId(String mainAccountId, String userId) {
+        if (mainAccountId != null && !mainAccountId.isBlank()) {
+            return mainAccountId;
+        }
+        if (userId != null && !userId.isBlank()) {
+            return userId;
+        }
+        throw new RuntimeException("Missing request header: X-Main-Account-Id");
+    }
+
+    private String resolveTradeAccount(String tradeAccount, String userId) {
+        if (tradeAccount != null && !tradeAccount.isBlank()) {
+            return tradeAccount;
+        }
+        if (userId != null && !userId.isBlank()) {
+            return userId;
+        }
+        throw new RuntimeException("Missing request header: X-Trade-Account");
     }
 }

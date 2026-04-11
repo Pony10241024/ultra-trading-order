@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 5501
 
 spring:
   application:
@@ -43,7 +43,7 @@ spring:
 # Gateway TCP Server Configuration (we are the TCP server, gateway connects to us)
 gateway:
   tcp:
-    port: 9900  # Our TCP server port
+    port: 5502  # Our TCP server port
     client:
       enabled: false
     host: 127.0.0.1

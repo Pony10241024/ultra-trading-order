@@ -1,4 +1,4 @@
-# Ultra Trading Order API
+# Ultra Trading Order HTTP API
 
 ## Overview
 
@@ -15,7 +15,7 @@ Unified response format:
   "code": 0,
   "message": "success",
   "data": {},
-  "timestamp": 1742648000123
+  "timestamp": 1742736000123
 }
 ```
 
@@ -23,8 +23,17 @@ Rules:
 
 - `code = 0` means success
 - `code != 0` means failure
-- Order and asset APIs require `X-User-Id`
-- Symbol APIs do not require authentication headers
+- Order and asset APIs require account identity
+- Preferred headers:
+  - `X-Main-Account-Id`
+  - `X-Trade-Account`
+- Backward compatibility:
+  - `X-User-Id` is still accepted temporarily, and will be used as both `mainAccountId` and `tradeAccount`
+
+User identity model:
+
+- `mainAccountId`: 所属主账户，长度 16
+- `tradeAccount`: 交易账号，长度 16，作为业务唯一账户标识
 
 Enums:
 
@@ -41,38 +50,25 @@ Enums:
 GET /api/symbol/list
 ```
 
-Description:
+No auth headers required.
 
-- Query all available symbols
-
-Response `data`:
+Response item:
 
 ```json
-[
-  {
-    "symbol": "BTCUSDT",
-    "baseAsset": "BTC",
-    "quoteAsset": "USDT",
-    "minOrderAmount": 10,
-    "minOrderQty": 0.00001,
-    "tickSize": 0.01,
-    "stepSize": 0.00001,
-    "makerFee": 0.001,
-    "takerFee": 0.001,
-    "exchange": "BINANCE",
-    "updateTime": 1742648000123
-  }
-]
+{
+  "symbol": "BTCUSDT",
+  "baseAsset": "BTC",
+  "quoteAsset": "USDT",
+  "minOrderAmount": 10,
+  "minOrderQty": 0.00001,
+  "tickSize": 0.01,
+  "stepSize": 0.00001,
+  "makerFee": 0.001,
+  "takerFee": 0.001,
+  "exchange": "BINANCE",
+  "updateTime": 1742736000123
+}
 ```
-
-Default built-in symbols:
-
-- `BTCUSDT`
-- `ETHUSDT`
-- `BNBUSDT`
-- `SOLUSDT`
-- `XRPUSDT`
-- `DOGEUSDT`
 
 ### Get Symbol By Code
 
@@ -83,40 +79,6 @@ GET /api/symbol/{symbol}
 Path params:
 
 - `symbol`: for example `BTCUSDT`
-
-Success example:
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "symbol": "BTCUSDT",
-    "baseAsset": "BTC",
-    "quoteAsset": "USDT",
-    "minOrderAmount": 10,
-    "minOrderQty": 0.00001,
-    "tickSize": 0.01,
-    "stepSize": 0.00001,
-    "makerFee": 0.001,
-    "takerFee": 0.001,
-    "exchange": "BINANCE",
-    "updateTime": 1742648000123
-  },
-  "timestamp": 1742648000456
-}
-```
-
-Failure example:
-
-```json
-{
-  "code": 404,
-  "message": "Symbol not found",
-  "data": null,
-  "timestamp": 1742648000456
-}
-```
 
 ## Asset APIs
 
@@ -131,7 +93,8 @@ POST /api/asset/increase
 Headers:
 
 - `Content-Type: application/json`
-- `X-User-Id: user001`
+- `X-Main-Account-Id: main001`
+- `X-Trade-Account: trade001`
 
 Request body:
 
@@ -143,47 +106,18 @@ Request body:
 }
 ```
 
-Fields:
-
-- `asset`: required, asset code, will be normalized to uppercase
-- `amount`: required, must be greater than `0`
-- `description`: optional, flow description
-
-Effects:
-
-- increases `available`
-- keeps `frozen` unchanged
-- writes a `DEPOSIT` asset flow
-- writes Redis cache
-- persists asynchronously into MySQL
-
-Success example:
+Success `data`:
 
 ```json
 {
-  "code": 0,
-  "message": "success",
-  "data": {
-    "id": null,
-    "userId": "user001",
-    "asset": "USDT",
-    "available": 100000,
-    "frozen": 0,
-    "updateTime": 1742648000123,
-    "total": 100000
-  },
-  "timestamp": 1742648000456
-}
-```
-
-Validation failure example:
-
-```json
-{
-  "code": 400,
-  "message": "Validation failed: {amount=Amount must be greater than 0}",
-  "data": null,
-  "timestamp": 1742648000456
+  "id": null,
+  "mainAccountId": "main001",
+  "tradeAccount": "trade001",
+  "asset": "USDT",
+  "available": 100000,
+  "frozen": 0,
+  "updateTime": 1742736000123,
+  "total": 100000
 }
 ```
 
@@ -195,25 +129,8 @@ GET /api/asset/balance?asset=USDT
 
 Headers:
 
-- `X-User-Id: user001`
-
-Query params:
-
-- `asset`: required
-
-Response `data`:
-
-```json
-{
-  "id": null,
-  "userId": "user001",
-  "asset": "USDT",
-  "available": 100000,
-  "frozen": 0,
-  "updateTime": 1742648000123,
-  "total": 100000
-}
-```
+- `X-Main-Account-Id: main001`
+- `X-Trade-Account: trade001`
 
 ### Get All Balances
 
@@ -223,11 +140,8 @@ GET /api/asset/balances
 
 Headers:
 
-- `X-User-Id: user001`
-
-Description:
-
-- returns only assets where `total > 0`
+- `X-Main-Account-Id: main001`
+- `X-Trade-Account: trade001`
 
 ### Get Asset Flows
 
@@ -237,26 +151,22 @@ GET /api/asset/flow?asset=USDT&limit=100
 
 Headers:
 
-- `X-User-Id: user001`
-
-Query params:
-
-- `asset`: optional
-- `limit`: optional, default `100`
+- `X-Trade-Account: trade001`
 
 Response item:
 
 ```json
 {
-  "flowId": "FLOW1742648000000abcd1234",
-  "userId": "user001",
+  "flowId": "FLOW1742736000000abcd1234",
+  "mainAccountId": "main001",
+  "tradeAccount": "trade001",
   "asset": "USDT",
   "flowType": "DEPOSIT",
   "amount": 100000,
   "balance": 100000,
   "relatedId": null,
   "description": "test recharge",
-  "createTime": 1742648000123
+  "createTime": 1742736000123
 }
 ```
 
@@ -271,203 +181,10 @@ POST /api/order/submit
 Headers:
 
 - `Content-Type: application/json`
-- `X-User-Id: user001`
+- `X-Main-Account-Id: main001`
+- `X-Trade-Account: trade001`
 
 Request body:
-
-```json
-{
-  "symbol": "BTCUSDT",
-  "orderType": "LIMIT",
-  "side": "BUY",
-  "price": 50000,
-  "quantity": 0.01,
-  "clientOrderId": "test-001"
-}
-```
-
-Fields:
-
-- `symbol`: required
-- `orderType`: required, `LIMIT` or `MARKET`
-- `side`: required, `BUY` or `SELL`
-- `price`: required for `LIMIT`
-- `quantity`: required
-- `clientOrderId`: optional
-
-Current business rules:
-
-- symbol must exist
-- `LIMIT` order must include `price`
-- `quantity` must be greater than or equal to `minOrderQty`
-- buy order freezes quote asset
-- sell order freezes base asset
-- market buy is not supported yet
-- order initial status is `PENDING`
-- without external trade callbacks, the order will not move to `FILLED`
-
-Success example:
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {
-    "orderId": "ORD1742648000000abcd1234",
-    "userId": "user001",
-    "symbol": "BTCUSDT",
-    "orderType": "LIMIT",
-    "side": "BUY",
-    "price": 50000,
-    "quantity": 0.01,
-    "filledQty": 0,
-    "avgPrice": 0,
-    "status": "PENDING",
-    "createTime": 1742648000123,
-    "updateTime": 1742648000123,
-    "clientOrderId": "test-001"
-  },
-  "timestamp": 1742648000456
-}
-```
-
-Typical failures:
-
-- `Symbol not found: BTCUSDT`
-- `Price is required for limit order`
-- `Quantity below minimum: ...`
-- `Insufficient balance: USDT`
-- `Insufficient balance: BTC`
-
-### Cancel Order
-
-```http
-POST /api/order/cancel/{orderId}
-```
-
-Headers:
-
-- `X-User-Id: user001`
-
-Path params:
-
-- `orderId`
-
-Success example:
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": "Order cancel request submitted",
-  "timestamp": 1742648000456
-}
-```
-
-Failure cases:
-
-- order not found
-- order does not belong to current user
-- order already filled or canceled
-
-### Get Order List
-
-```http
-GET /api/order/list?symbol=BTCUSDT
-```
-
-Headers:
-
-- `X-User-Id: user001`
-
-Query params:
-
-- `symbol`: optional
-
-Response item:
-
-```json
-{
-  "orderId": "ORD1742648000000abcd1234",
-  "userId": "user001",
-  "symbol": "BTCUSDT",
-  "orderType": "LIMIT",
-  "side": "BUY",
-  "price": 50000,
-  "quantity": 0.01,
-  "filledQty": 0,
-  "avgPrice": 0,
-  "status": "PENDING",
-  "createTime": 1742648000123,
-  "updateTime": 1742648000123,
-  "clientOrderId": "test-001"
-}
-```
-
-### Get Trade List By Order
-
-```http
-GET /api/order/trades/{orderId}
-```
-
-Headers:
-
-- `X-User-Id: user001`
-
-Path params:
-
-- `orderId`
-
-Response item:
-
-```json
-{
-  "tradeId": "TRADE1742648000000abcd1234",
-  "orderId": "ORD1742648000000abcd1234",
-  "counterOrderId": "ORD1742647000000efgh5678",
-  "userId": "user001",
-  "symbol": "BTCUSDT",
-  "price": 50000,
-  "quantity": 0.01,
-  "fee": 0.00001,
-  "feeAsset": "BTC",
-  "tradeTime": 1742648000123,
-  "maker": false
-}
-```
-
-Note:
-
-- if there is no external EMS or trade callback, this list is usually empty
-
-## Test Data
-
-Recommended test users:
-
-- `user001`
-- `user002`
-
-Recommended asset setup for `user001`:
-
-- `USDT`: `100000`
-- `BTC`: `1`
-- `ETH`: `20`
-- `SOL`: `500`
-
-Recommended symbol data:
-
-| Symbol | Min Qty | Tick Size | Step Size | Suggested Price |
-| --- | ---: | ---: | ---: | ---: |
-| BTCUSDT | 0.00001 | 0.01 | 0.00001 | 50000 |
-| ETHUSDT | 0.0001 | 0.01 | 0.0001 | 3000 |
-| BNBUSDT | 0.001 | 0.01 | 0.001 | 600 |
-| SOLUSDT | 0.01 | 0.001 | 0.01 | 150 |
-| XRPUSDT | 1 | 0.0001 | 1 | 0.60 |
-| DOGEUSDT | 1 | 0.00001 | 1 | 0.12 |
-
-Recommended order request examples:
-
-Buy BTC:
 
 ```json
 {
@@ -480,59 +197,115 @@ Buy BTC:
 }
 ```
 
-Sell BTC:
+Request fields:
+
+- `symbol`: `string`，交易对，例如 `BTCUSDT`
+- `orderType`: `enum(OrderType)`，可选值：`LIMIT`、`MARKET`
+- `side`: `enum(OrderSide)`，可选值：`BUY`、`SELL`
+- `price`: `number`，限价单必填，市价单可不传
+- `quantity`: `number`
+- `clientOrderId`: `string`，可选
+
+Success `data`:
 
 ```json
 {
+  "orderId": "ORD1742736000000abcd1234",
+  "mainAccountId": "main001",
+  "tradeAccount": "trade001",
   "symbol": "BTCUSDT",
   "orderType": "LIMIT",
-  "side": "SELL",
-  "price": 52000,
-  "quantity": 0.005,
-  "clientOrderId": "sell-btc-001"
+  "side": "BUY",
+  "price": 50000,
+  "quantity": 0.01,
+  "filledQty": 0,
+  "avgPrice": 0,
+  "status": "PENDING",
+  "createTime": 1742736000123,
+  "updateTime": 1742736000123,
+  "clientOrderId": "buy-btc-001"
 }
 ```
 
-Buy ETH:
+### Cancel Order
+
+```http
+POST /api/order/cancel/{orderId}
+```
+
+Headers:
+
+- `X-Trade-Account: trade001`
+
+### Get Order List
+
+```http
+GET /api/order/list?symbol=BTCUSDT
+```
+
+Headers:
+
+- `X-Trade-Account: trade001`
+
+### Get Today Order List
+
+按照 `UTC+0` 自然日查询当日订单，`createTime` 使用毫秒时间戳，按 `createTime` 倒序返回。
+
+```http
+GET /api/order/today?symbol=BTCUSDT
+```
+
+Headers:
+
+- `X-Trade-Account: trade001`
+
+### Get Trade List By Order
+
+```http
+GET /api/order/trades/{orderId}
+```
+
+Headers:
+
+- `X-Trade-Account: trade001`
+
+Response item:
 
 ```json
 {
-  "symbol": "ETHUSDT",
-  "orderType": "LIMIT",
-  "side": "BUY",
-  "price": 3000,
-  "quantity": 0.1,
-  "clientOrderId": "buy-eth-001"
+  "tradeId": "TRADE1742736000000abcd1234",
+  "orderId": "ORD1742736000000abcd1234",
+  "counterOrderId": "ORD1742735000000efgh5678",
+  "mainAccountId": "main001",
+  "tradeAccount": "trade001",
+  "symbol": "BTCUSDT",
+  "price": 50000,
+  "quantity": 0.01,
+  "fee": 0.00001,
+  "feeAsset": "BTC",
+  "tradeTime": 1742736000123,
+  "maker": false
 }
 ```
 
-Buy XRP:
+## Test Data
 
-```json
-{
-  "symbol": "XRPUSDT",
-  "orderType": "LIMIT",
-  "side": "BUY",
-  "price": 0.6,
-  "quantity": 100,
-  "clientOrderId": "buy-xrp-001"
-}
-```
+Recommended test identity:
 
-## Recommended Test Flow
+- `mainAccountId = main001`
+- `tradeAccount = trade001`
 
-1. Call `GET /api/symbol/list` to confirm default symbols are loaded.
-2. Call `POST /api/asset/increase` to give `user001` enough balance.
-3. Call `GET /api/asset/balances` to verify balances.
-4. Call `POST /api/order/submit` for a `BTCUSDT` limit order.
-5. Call `GET /api/order/list` to verify order persistence.
-6. Call `POST /api/order/cancel/{orderId}` to verify cancel flow.
-7. Call `GET /api/asset/flow` to verify deposit and freeze flows.
-8. Call `GET /api/order/trades/{orderId}`. Without a trade callback, it is usually empty.
+Recommended funding:
 
-## Current Test Boundary
+- `USDT = 100000`
+- `BTC = 1`
+- `ETH = 20`
 
-- `syncSymbolsFromBinance()` now uses local default symbols and does not rely on Binance network access.
-- OKX sync is disabled in the task runner.
-- Without external trade callbacks, orders will not be filled automatically.
-- `POST /api/asset/increase` is for testing and should not be exposed directly in production.
+Recommended symbols:
+
+- `BTCUSDT`
+- `ETHUSDT`
+- `BNBUSDT`
+- `SOLUSDT`
+- `XRPUSDT`
+- `DOGEUSDT`

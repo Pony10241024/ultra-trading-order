@@ -9,7 +9,8 @@ import java.math.BigDecimal;
 @Entity
 @Table(name = "tb_trade", indexes = {
     @Index(name = "idx_order_id", columnList = "orderId"),
-    @Index(name = "idx_user_id", columnList = "userId"),
+    @Index(name = "idx_main_account_id", columnList = "main_account_id"),
+    @Index(name = "idx_trade_account", columnList = "trade_account"),
     @Index(name = "idx_trade_time", columnList = "tradeTime")
 })
 public class Trade implements Serializable {
@@ -25,8 +26,11 @@ public class Trade implements Serializable {
     @Column(length = 64)
     private String counterOrderId;      // 对手订单ID
 
-    @Column(length = 64, nullable = false)
-    private String userId;              // 用户ID
+    @Column(name = "main_account_id", length = 16, nullable = false)
+    private String mainAccountId;       // 所属主账户
+
+    @Column(name = "trade_account", length = 16, nullable = false)
+    private String tradeAccount;        // 交易账号
 
     @Column(length = 32, nullable = false)
     private String symbol;              // 交易对

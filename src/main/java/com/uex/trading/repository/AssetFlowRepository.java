@@ -8,6 +8,6 @@ import java.util.List;
 
 @Repository
 public interface AssetFlowRepository extends JpaRepository<AssetFlow, String> {
-    List<AssetFlow> findByUserId(String userId);
+    List<AssetFlow> findByTradeAccount(String tradeAccount);
     List<AssetFlow> findByRelatedId(String relatedId);
 }
